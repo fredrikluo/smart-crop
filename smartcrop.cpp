@@ -1,6 +1,6 @@
-#include "opencv2/objdetect/objdetect.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/objdetect/objdetect.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 #include <iostream>
 #include <stdio.h>
@@ -8,6 +8,8 @@
 
 using namespace std;
 using namespace cv;
+
+//#define USE_CCV
 
 #define EXPAND_RGB(pixel) \
     uchar b = pixel.val[0]; \
@@ -33,7 +35,6 @@ const float DETAILWEIGHT = 0.2;
 const float EDGERADIUS = 0.4;
 const float EDGEWEIGHT = -20.0;
 
-const char *  FACE_CASECADE_FILE = "../../opencv/data/haarcascades/haarcascade_frontalface_default.xml";
 
 static uchar cie(Vec3b & pixel) {
     EXPAND_RGB(pixel)
@@ -129,20 +130,40 @@ static float score_rect(const Mat& o, const Rect& r) {
                (r.width * r.height);
 }
 
+#ifdef USE_CCV
+extern "C" {
+#include <ccv.h>
+}
+
+const char *  SCD_CASCADE_FILE = "../../ccv/samples/face.sqlite3";
+void detect_face(Mat& i, vector<Rect> &faces_r) {
+    ccv_dense_matrix_t image = ccv_dense_matrix(i.rows, i.cols, CCV_8U|CCV_C3, i.ptr(), 0);
+    ccv_scd_classifier_cascade_t* cascade = ccv_scd_classifier_cascade_read(SCD_CASCADE_FILE);
+    ccv_array_t* faces = ccv_scd_detect_objects(&image, &cascade, 1, ccv_scd_default_params);
+    for (int i = 0; i < faces->rnum; i++) {
+        ccv_comp_t* face = (ccv_comp_t*)ccv_array_get(faces, i);
+        faces_r.push_back(Rect(face->rect.x, face->rect.y, face->rect.width, face->rect.height));
+    }
+    ccv_array_free(faces);
+    ccv_scd_classifier_cascade_free(cascade);
+}
+#else
+const char *  FACE_CASCADE_FILE = "../../opencv/data/haarcascades/haarcascade_frontalface_default.xml";
 void detect_face(Mat& i, vector<Rect> &faces) {
     // Boost the region if there is face.
     // Load Face cascade (.xml file)
     CascadeClassifier face_cascade;
-    face_cascade.load(FACE_CASECADE_FILE);
+    face_cascade.load(FACE_CASCADE_FILE);
 
     // Detect faces
     face_cascade.detectMultiScale(i, faces, 1.1, 2, 0|CV_HAAR_SCALE_IMAGE, Size(20, 20));
 }
+#endif //USE_CCV
 
 void process_(Mat& i, Mat& r) {
     size_t w = i.cols;
     size_t h = i.rows;
-    Mat o(h, w, CV_8UC3);
+    Mat o(Size(w, h), CV_8UC3);
     Size ts(r.cols, r.rows);
 
     for (size_t y = 0; y < h; y++) {
@@ -199,7 +220,7 @@ void process_(Mat& i, Mat& r) {
     gen_crop_rect(Size(w, h), ts, crop_rect);
 
     Rect best_crop;
-    float best_score = 0;
+    float best_score = -FLT_MAX;
     for (int i = 0; i < crop_rect.size(); i ++) {
         float score = score_rect(o, crop_rect[i]);
 #ifdef DEBUG
@@ -214,13 +235,19 @@ void process_(Mat& i, Mat& r) {
         }
     }
 
-    resize(i(best_crop), r, ts, 0, 0, INTER_LINEAR);
+#ifdef DEBUG
+    rectangle(o, best_crop, Scalar(0, 255, 255), 15);
+    imwrite("./debug.jpg", o);
+#endif // DEBUG
+
+    Mat crop(i, best_crop);
+    resize(crop, r, ts, 0, 0, INTER_LINEAR);
 }
 
 void process(unsigned char * src_img, int src_w, int src_h,
              unsigned char * dst_img, int dst_w, int dst_h) {
-    Mat i(src_h, src_w, CV_8UC3, src_img);
-    Mat o(dst_h, dst_w, CV_8UC3, dst_img);
+    Mat i(Size(src_w, src_h), CV_8UC3, src_img);
+    Mat o(Size(dst_w, dst_h), CV_8UC3, dst_img);
     process_(i, o);
 }
 
